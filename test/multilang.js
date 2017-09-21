@@ -120,7 +120,7 @@ Multilang.prototype.getPlugin = function () {
 
                 if (files[file].locale === self.default) {
                     files[file].path = '';
-                    files[name] = Object.assign({},files[file]);
+                    files[name] = files[file];
                 } else {
                     files[file].path = files[file].locale +'/';
                     name = files[file].locale + '/' + name;
