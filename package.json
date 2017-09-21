@@ -22,7 +22,9 @@
   "bugs": {
     "url": "https://github.com/doup/metalsmith-multi-language/issues"
   },
-  "dependencies": {},
+  "dependencies": {
+    "deepmerge": "^1.5.1"
+  },
   "devDependencies": {
     "chai": "^3.0.0",
     "metalsmith": "^1.7.0",
