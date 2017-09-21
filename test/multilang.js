@@ -1,156 +1,140 @@
 'use strict';
+const deepmerge = require('deepmerge');
 
-var expect     = require('chai').expect;
-var Metalsmith = require('metalsmith');
-var Multilang  = require('../lib/multilang');
-var noop       = function () {};
+var extname = require('path').extname;
 
-describe('/lib/multilang.js', function () {
-    var multilang = new Multilang({ default: 'es', locales: ['en', 'es'] });
+function Multilang(ops) {
+    this.default = ops.default;
+    this.locales = ops.locales;
+    this.pattern = RegExp('.*_('+ ops.locales.join('|') +')(?=\\..*?$)');
+    this.pathPattern = RegExp('(^(' + ops.locales.join('|') +')/|/(' + ops.locales.join('|') +')/)');
+}
 
-    describe('getAltFilename()', function () {
-        it('should return the alternative filename', function () {
-            expect(multilang.getAltFilename('index_es.html', 'es', 'ca')).to.equal('index_ca.html');
-            expect(multilang.getAltFilename('index_es.html', 'es', 'es')).to.equal('index_es.html');
-            expect(multilang.getAltFilename('some/path/file_es.md', 'es', 'ca')).to.equal('some/path/file_ca.md');
-            expect(multilang.getAltFilename('some/path/file_es.md', 'es', 'es')).to.equal('some/path/file_es.md');
-            expect(multilang.getAltFilename('some/es/file.md', 'es', 'ca')).to.equal('some/ca/file.md');
-            expect(multilang.getAltFilename('some/es/file.md', 'es', 'es')).to.equal('some/es/file.md');
-            expect(multilang.getAltFilename('es/file.md', 'es', 'ca')).to.equal('ca/file.md');
-            expect(multilang.getAltFilename('es/file.md', 'es', 'es')).to.equal('es/file.md');
-        });
-    });
+Multilang.prototype.getAltFilename = function (file, fromLocale, toLocale) {
+    var ext = extname(file);
 
-    describe('getBaseFilename()', function () {
-        it('should return the base filename', function () {
-            expect(multilang.getBaseFilename('index_es.html')).to.equal('index_es.html');
-            expect(multilang.getBaseFilename('index_en.html')).to.equal('index_es.html');
-            expect(multilang.getBaseFilename('some/path/file_es.md')).to.equal('some/path/file_es.md');
-            expect(multilang.getBaseFilename('some/path/file_en.md')).to.equal('some/path/file_es.md');
-            expect(multilang.getBaseFilename('some/es/file.md')).to.equal('some/es/file.md');
-            expect(multilang.getBaseFilename('some/en/file.md')).to.equal('some/es/file.md');
-            expect(multilang.getBaseFilename('es/file.md')).to.equal('es/file.md');
-            expect(multilang.getBaseFilename('en/file.md')).to.equal('es/file.md');
-        });
+    // Locale in the path.
+    if (this.pathPattern.test(file)) {
+        var replacementString = file.match(this.pathPattern)[0].replace(fromLocale, toLocale);
+        return file.replace(this.pathPattern, replacementString);
+    }
 
-        it('should ignore unknown locales', function () {
-            expect(multilang.getBaseFilename('index_ca.html')).to.equal('index_ca.html');
-            expect(multilang.getBaseFilename('ca/file.md')).to.equal('ca/file.md');
-        });
-    });
+    // Locale in the filename.
+    return file.replace('_'+ fromLocale + ext, '_'+ toLocale + ext);
+};
 
-    describe('getLocale()', function () {
-        it('should return the file locale', function () {
-            expect(multilang.getLocale('index_es.html')).to.equal('es');
-            expect(multilang.getLocale('index_en.html')).to.equal('en');
-            expect(multilang.getLocale('some/path/file_es.md')).to.equal('es');
-            expect(multilang.getLocale('some/path/file_en.md')).to.equal('en');
-            expect(multilang.getLocale('some/es/file.md')).to.equal('es');
-            expect(multilang.getLocale('some/en/file.md')).to.equal('en');
-            expect(multilang.getLocale('es/file.md')).to.equal('es');
-            expect(multilang.getLocale('en/file.md')).to.equal('en');
-        });
-    });
+// Returns the name of the main filename
+// It's usefull to know which file is the main when merging properties
+//
+// Given { default: 'es', locales: ['ca', 'es'] }
+// And file_ca.md as argument
+// Returns file_es.md
+Multilang.prototype.getBaseFilename = function (file) {
 
-    describe('getPlugin()', function () {
-        it('should add `defaultLocale` and `locales` to Metalsmith metadata', function () {
-            var ms     = Metalsmith(__dirname);
-            var plugin = multilang.getPlugin();
+    // Locale in the path.
+    if (this.pathPattern.test(file)) {
+        var replacementString = file.match(this.pathPattern)[0].replace(
+            RegExp('(/?)('+ this.locales.join('|') +')(/)'),
+            '$1' + this.default + '$3'
+        );
+        return file.replace(this.pathPattern, replacementString);
+    }
 
-            plugin([], ms, noop);
+    // Locale in the filename.
+    var ext = extname(file);
+    return file.replace(RegExp('_('+ this.locales.join('|') +')(?:'+ ext +')?$'), '_' + this.default + ext);
+};
 
-            expect(ms.metadata()).to.have.property('defaultLocale');
-            expect(ms.metadata().defaultLocale).to.equal('es');
-            expect(ms.metadata()).to.have.property('locales');
-            expect(ms.metadata().locales).to.deep.equal(['en', 'es']);
-        });
+Multilang.prototype.getLocale = function (file) {
+    // Locale in the path.
+    if (this.pathPattern.test(file)) {
+        return file.match(this.pathPattern)[0].replace(
+            RegExp('(/?)('+ this.locales.join('|') +')(/)'),
+            '$2'
+        );
+    }
 
-        it('should handle index files gracefully', function () {
-            var ms     = Metalsmith(__dirname);
-            var plugin = multilang.getPlugin();
-            var files  = { 'index_en.html': {}, 'index_es.html': {} };
+    // Locale in the filename.
+    return file.match(this.pattern)[1];
+};
 
-            plugin(files, ms, noop);
+Multilang.prototype.getPlugin = function () {
+    var self = this;
 
-            expect(files).not.to.have.property('index_en.html');
-            expect(files).not.to.have.property('index_es.html');
-            expect(files).to.have.property('index.html');
-            expect(files).to.have.property('en/index.html');
-            expect(files['index.html'].path).to.equal('');
-            expect(files['en/index.html'].path).to.equal('en/');
-        });
+    function lang(locale) {
+        if (locale in this.altFiles) {
+            return this.altFiles[locale];
+        } else {
+            throw new Error('Unknown locale "'+ locale +'".');
+        }
+    }
 
-        it('should add `locale` property to files', function () {
-            var ms     = Metalsmith(__dirname);
-            var plugin = multilang.getPlugin();
-            var files  = { 'rand.md': {}, 'file_ca.md': {}, 'file_en.md': {}, 'file_es.md': {} };
+    return function (files, ms, done) {
+        ms.metadata().locales       = self.locales.reduce((locObj, locale) =>
+                                                          Object.assign(locObj, {[locale]: {}}), {});
+        ms.metadata().defaultLocale = self.default;
 
-            plugin(files, ms, noop);
+        for (var file in files) {
+            if (self.pattern.test(file) || self.pathPattern.test(file)) {
+                var base = self.getBaseFilename(file);
 
-            expect(files['rand.md'].locale).to.equal('es');
-            expect(files['file_ca.md'].locale).to.equal('es');
-            expect(files['file_en.md'].locale).to.equal('en');
-            expect(files['file_es.md'].locale).to.equal('es');
-        });
+                files[file].locale = self.getLocale(file);
 
-        it('should merge main (default) locale properties into the secondary locales', function () {
-            var ms     = Metalsmith(__dirname);
-            var plugin = multilang.getPlugin();
-            var files  = {
-                'file_es.md': { base: 'copy-this', title: 'es' }, // main
-                'file_en.md': { title: 'en', other: 'leave' }     // secondary
-            };
+                // Add missing properties from base locale
+                // This lets to have base some generic properties
+                // applied only in the 'default' locale, e.g.: template
+                if (base !== file) {
+                    if(files[base] && files[file]){
+                        var contents = files[file].contents;
+                        files[file] = deepmerge(files[base], files[file], {clone:true});
+                        files[file].contents = contents;
+                    }
+                }
+            } else {
+                files[file].locale = self.default;
+            }
 
-            plugin(files, ms, noop);
+            // Generate altFiles map
+            files[file].altFiles = {};
 
-            expect(files['file_es.md'].title).to.equal('es');
-            expect(files['file_es.md'].base).to.equal('copy-this');
+            self.locales.forEach(function (locale) {
+                if (locale != files[file].locale) {
+                    files[file].altFiles[locale] = files[self.getAltFilename(file, files[file].locale, locale)];
+                }
+            });
 
-            expect(files['file_en.md'].title).to.equal('en');
-            expect(files['file_en.md'].other).to.equal('leave');
-            expect(files['file_en.md'].base).to.equal('copy-this');
-        });
+            // Bind lang()
+            files[file].lang = lang.bind(files[file]);
 
-        it('should add `lang` method in each file to retrieve the alternative language file', function () {
-            var ms     = Metalsmith(__dirname);
-            var plugin = multilang.getPlugin();
-            var files  = { 'file_es.md': { title: 'es' }, 'file_en.md': { title: 'en' } };
+            // Ad file to locale index.
+            ms.metadata().locales[files[file].locale][file] = files[file];
+        }
 
-            plugin(files, ms, noop);
+        // Index handling
+        // Default locale will go in 'index.html'
+        // Other index-es in '/:locale/index.html'
+        for (file of Object.keys(files)) {
+            if (files[file].index) {
+                var name = file.replace(this.pattern, '');
+                name = name.substr(name.lastIndexOf('/') + 1);
 
-            expect(files['file_es.md']).to.have.property('lang');
-            expect(files['file_en.md']).to.have.property('lang');
+                if (files[file].locale === self.default) {
+                    files[file].path = '';
+                    files[name] = Object.assign({},files[file]);
+                } else {
+                    files[file].path = files[file].locale +'/';
+                    name = files[file].locale + '/' + name;
+                    files[name] = files[file];
+                }
 
-            // Check references
-            expect(files['file_es.md'].lang('en')).to.equal(files['file_en.md']);
-            expect(files['file_en.md'].lang('es')).to.equal(files['file_es.md']);
+                // Remove old entry
+                if(name !== file)
+                    delete files[file];
+            }
+        }
 
-            expect(files['file_es.md'].lang('en').title).to.equal('en');
-            expect(files['file_es.md'].lang('es').title).to.equal('es');
-            expect(files['file_en.md'].lang('es').title).to.equal('es');
-        });
+        done();
+    };
+};
 
-        it('should throw an expection if alt file does not exist when calling `lang`', function () {
-            var ms     = Metalsmith(__dirname);
-            var plugin = multilang.getPlugin();
-            var files  = { 'file_es.md': { title: 'es' }, 'file_en.md': { title: 'en' } };
-
-            plugin(files, ms, noop);
-
-            expect(function () {
-                files['file_es.md'].lang('ca');
-            }).to.throw('Unknown locale "ca".');
-        });
-    });
-
-    describe('merge()', function () {
-        it('should merge two objects', function () {
-            var a = { base: 'a', title: 'a'};
-            var b = { title: 'b', other: 'b' };
-
-            multilang.merge(a, b);
-
-            expect(b).to.deep.equal({ base: 'a', title: 'b', other: 'b' });
-        });
-    });
-});
+module.exports = Multilang;
